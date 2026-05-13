@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>RunBot — Score Model Visualizer</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #f5f1ea;
+    --bg-card:  #ffffff;
+    --bg-sub:   #ece5d7;
+    --ink:      #1a1815;
+    --ink-soft: #5a5448;
+    --rule:     #d6cdb9;
+    --accent:   #c9532e;
+    --accent-soft: #f1d9cf;
+    --good:     #4a7c4e;
+    --warn:     #c89020;
+    --bad:      #b8412c;
+    --display:  'Fraunces', Georgia, serif;
+    --body:     'Manrope', system-ui, sans-serif;
+    --mono:     'JetBrains Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 15px;
+    line-height: 1.6;
+    padding: 40px 24px 80px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+
+  /* HEADER */
+  header {
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 32px;
+    margin-bottom: 48px;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 16px;
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 56px;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin: 0 0 16px;
+    font-style: italic;
+  }
+  h1 span { font-style: normal; font-weight: 400; }
+  .lede {
+    font-family: var(--display);
+    font-size: 20px;
+    line-height: 1.45;
+    color: var(--ink-soft);
+    max-width: 720px;
+    margin: 0;
+    font-weight: 400;
+  }
+
+  /* SECTIONS */
+  section {
+    background: var(--bg-card);
+    border-radius: 4px;
+    padding: 40px;
+    margin-bottom: 32px;
+    border: 1px solid var(--rule);
+  }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .section-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+  }
+  h2 {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 32px;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  .section-desc {
+    color: var(--ink-soft);
+    font-size: 15px;
+    margin: 12px 0 28px;
+    max-width: 800px;
+  }
+  .formula {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--bg-sub);
+    padding: 14px 18px;
+    border-left: 3px solid var(--accent);
+    margin: 16px 0 24px;
+    color: var(--ink);
+    overflow-x: auto;
+  }
+  .formula .c { color: var(--accent); }
+
+  /* CHARTS */
+  .chart {
+    width: 100%;
+    height: 480px;
+  }
+
+  /* RUN-TYPE LEGEND */
+  .runtype-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  .runtype-pill {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    padding: 6px 12px;
+    border: 1px solid var(--rule);
+    background: var(--bg-card);
+    color: var(--ink-soft);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border-radius: 2px;
+  }
+  .runtype-pill.active {
+    background: var(--ink);
+    color: var(--bg-card);
+    border-color: var(--ink);
+  }
+  .runtype-pill:hover:not(.active) {
+    border-color: var(--ink);
+    color: var(--ink);
+  }
+
+  /* SCENARIO BUILDER */
+  .scenario {
+    display: grid;
+    grid-template-columns: minmax(280px, 320px) 1fr;
+    gap: 40px;
+  }
+  @media (max-width: 800px) {
+    .scenario { grid-template-columns: 1fr; }
+    h1 { font-size: 40px; }
+    section { padding: 24px; }
+  }
+  .controls .field {
+    margin-bottom: 22px;
+  }
+  .controls label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 8px;
+  }
+  .field-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  input[type="range"] {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    background: var(--rule);
+    border-radius: 2px;
+    outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: 2px solid var(--bg-card);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: 2px solid var(--bg-card);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .field-val {
+    font-family: var(--mono);
+    font-size: 14px;
+    min-width: 64px;
+    text-align: right;
+    color: var(--ink);
+    font-weight: 500;
+  }
+  select {
+    width: 100%;
+    padding: 8px 12px;
+    font-family: var(--body);
+    font-size: 14px;
+    border: 1px solid var(--rule);
+    background: var(--bg-card);
+    color: var(--ink);
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
+  /* SCORE PANEL */
+  .score-panel {
+    background: var(--bg-sub);
+    padding: 32px;
+    border-radius: 4px;
+  }
+  .score-display {
+    display: flex;
+    align-items: baseline;
+    gap: 24px;
+    margin-bottom: 24px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .score-num {
+    font-family: var(--display);
+    font-size: 80px;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -0.04em;
+  }
+  .score-num.good { color: var(--good); }
+  .score-num.warn { color: var(--warn); }
+  .score-num.bad  { color: var(--bad); }
+  .score-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .score-verdict {
+    font-family: var(--display);
+    font-style: italic;
+    font-size: 18px;
+    color: var(--ink);
+  }
+  .breakdown {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .breakdown-row {
+    display: grid;
+    grid-template-columns: 90px 1fr 70px;
+    align-items: center;
+    gap: 14px;
+    padding: 6px 0;
+    font-size: 14px;
+    border-bottom: 1px dotted var(--rule);
+  }
+  .breakdown-row:last-child { border-bottom: none; }
+  .b-factor {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .b-detail { color: var(--ink); }
+  .b-amount {
+    font-family: var(--mono);
+    font-weight: 500;
+    text-align: right;
+    color: var(--bad);
+  }
+  .b-amount.zero { color: var(--good); }
+  .empty-breakdown {
+    font-style: italic;
+    color: var(--ink-soft);
+    text-align: center;
+    padding: 24px 0;
+    font-family: var(--display);
+  }
+
+  /* FOOTER */
+  footer {
+    text-align: center;
+    color: var(--ink-soft);
+    font-size: 12px;
+    font-family: var(--mono);
+    letter-spacing: 0.08em;
+    margin-top: 40px;
+    padding-top: 32px;
+    border-top: 1px solid var(--rule);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">Score Model — Visualization</p>
+    <h1>How RunBot <span>decides when</span><br><em>you should run</em></h1>
+    <p class="lede">Every weather hour is scored from 0 to 100. Four factors deduct points: temperature drift from the run-type's ideal, wind, precipitation probability, and weather codes. This page makes the math legible.</p>
+  </header>
+
+  <!-- TEMPERATURE -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">01 / TEMPERATURE</span>
+    </div>
+    <h2>Asymmetric sweet-spot curves</h2>
+    <p class="section-desc">Each run type has a <code>feelsIdeal</code> (where it runs best) and asymmetric <code>feelsMin</code>/<code>feelsMax</code> band edges. A small dead-zone (20% of the side range) yields zero penalty around the ideal. Outside it, penalty climbs to 12 at the band edge, then continues steeper outside the band — no discontinuity at the boundary.</p>
+    <div class="formula">
+      tolerance = sideRange × 0.2  · overshoot = (distance − tolerance) ÷ (sideRange − tolerance)  · <span class="c">penalty = overshoot × 12</span>
+    </div>
+    <div class="runtype-controls" id="runtypePills"></div>
+    <div id="tempChart" class="chart"></div>
+  </section>
+
+  <!-- WIND -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">02 / WIND</span>
+    </div>
+    <h2>Two-regime linear ramp</h2>
+    <p class="section-desc">No penalty below 8 kph. Soft regime adds 1 point per kph above 8. Above 25 kph, a harsh regime takes over starting from where the soft regime ended (17 points) at 1.5 per kph — making a 30 kph gust meaningfully worse than a 24 kph one.</p>
+    <div class="formula">
+      8–25 kph: <span class="c">(wind − 8) × 1.0</span>  ·  &gt;25 kph: <span class="c">17 + (wind − 25) × 1.5</span>
+    </div>
+    <div id="windChart" class="chart"></div>
+  </section>
+
+  <!-- PRECIPITATION -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">03 / PRECIPITATION</span>
+    </div>
+    <h2>Probability-weighted penalty</h2>
+    <p class="section-desc">Forecasts of 15% or less contribute nothing. From 15% to 40%, the penalty grows at 0.8 per percentage point. Above 40%, the harsher regime continues from 20 (where the soft regime ended) at the same slope — gentle continuation rather than a cliff.</p>
+    <div class="formula">
+      15–40%: <span class="c">(precip − 15) × 0.8</span>  ·  &gt;40%: <span class="c">20 + (precip − 40) × 0.8</span>
+    </div>
+    <div id="precipChart" class="chart"></div>
+  </section>
+
+  <!-- WEATHER CODES -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">04 / WEATHER CODES</span>
+    </div>
+    <h2>Discrete category penalties</h2>
+    <p class="section-desc">WMO weather codes from Open-Meteo map to category penalties independent of precip probability. This catches situations where probability is low but the forecast still says drizzle or fog. Thunderstorm essentially disqualifies an hour (penalty 100).</p>
+    <div id="weatherCodeChart" class="chart" style="height: 420px;"></div>
+  </section>
+
+  <!-- INTERACTIVE SCENARIO -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">05 / SCENARIO</span>
+    </div>
+    <h2>Try a window</h2>
+    <p class="section-desc">Pick a run type and dial conditions to see how the score is built up from the four factors. The deductions match the live scoring in Find Optimal Running Window exactly.</p>
+    <div class="scenario">
+      <div class="controls">
+        <div class="field">
+          <label for="run-type">Run type</label>
+          <select id="run-type"></select>
+        </div>
+        <div class="field">
+          <label for="feels">Feels-like temperature</label>
+          <div class="field-row">
+            <input type="range" id="feels" min="-10" max="30" step="0.5" value="10">
+            <span class="field-val" id="feels-val">10.0 °C</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="wind">Wind speed</label>
+          <div class="field-row">
+            <input type="range" id="wind" min="0" max="40" step="1" value="8">
+            <span class="field-val" id="wind-val">8 kph</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="precip">Precipitation probability</label>
+          <div class="field-row">
+            <input type="range" id="precip" min="0" max="100" step="1" value="5">
+            <span class="field-val" id="precip-val">5 %</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="wcode">Weather code</label>
+          <select id="wcode">
+            <option value="0">0 — Clear sky</option>
+            <option value="3">3 — Overcast</option>
+            <option value="45">45 — Fog</option>
+            <option value="51">51 — Light drizzle</option>
+            <option value="55">55 — Dense drizzle</option>
+            <option value="63">63 — Moderate rain</option>
+            <option value="65">65 — Heavy rain</option>
+            <option value="73">73 — Moderate snow</option>
+            <option value="82">82 — Violent rain showers</option>
+            <option value="95">95 — Thunderstorm</option>
+          </select>
+        </div>
+      </div>
+      <div class="score-panel">
+        <div class="score-display">
+          <span class="score-num" id="score-num">100</span>
+          <div>
+            <div class="score-label">Out of 100</div>
+            <div class="score-verdict" id="score-verdict">Excellent window</div>
+          </div>
+        </div>
+        <div class="breakdown" id="breakdown"></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>RUNBOT · PERSONAL RUNNING ASSISTANT · MTL</footer>
+</div>
+
+<script>
+// =====================================================================
+// SCORING LOGIC — mirrors Find Optimal Running Window exactly
+// =====================================================================
+const TYPE_RULES = {
+  Easy:           { feelsMin: 4,  feelsMax: 18, feelsIdeal: 10, bufferMin: 15 },
+  Long:           { feelsMin: 0,  feelsMax: 14, feelsIdeal: 7,  bufferMin: 25 },
+  Tempo:          { feelsMin: 3,  feelsMax: 16, feelsIdeal: 9,  bufferMin: 20 },
+  Interval:       { feelsMin: 3,  feelsMax: 16, feelsIdeal: 9,  bufferMin: 25 },
+  'Time Trial':   { feelsMin: 2,  feelsMax: 14, feelsIdeal: 7,  bufferMin: 30 },
+  'Rolling 400s': { feelsMin: 3,  feelsMax: 16, feelsIdeal: 9,  bufferMin: 25 },
+  Fartlek:        { feelsMin: 3,  feelsMax: 16, feelsIdeal: 9,  bufferMin: 20 },
+  'Hill Repeats': { feelsMin: 2,  feelsMax: 14, feelsIdeal: 7,  bufferMin: 25 },
+  Progression:    { feelsMin: 3,  feelsMax: 15, feelsIdeal: 8,  bufferMin: 20 },
+  Strength:       { feelsMin: 4,  feelsMax: 17, feelsIdeal: 10, bufferMin: 20 }
+};
+
+// Color palette per run type — warm earth tones, no rainbow assignment
+const TYPE_COLORS = {
+  Easy:           '#c9532e',
+  Long:           '#5a7c3f',
+  Tempo:          '#c89020',
+  Interval:       '#8a4a8e',
+  'Time Trial':   '#b8412c',
+  'Rolling 400s': '#3a7080',
+  Fartlek:        '#a06b3c',
+  'Hill Repeats': '#7c4a8e',
+  Progression:    '#4a7c4e',
+  Strength:       '#c0703a'
+};
+
+function tempPenalty(feels, rules) {
+  const idealCenter = rules.feelsIdeal;
+  const distance    = Math.abs(feels - idealCenter);
+  const sideRange   = feels < idealCenter
+    ? idealCenter - rules.feelsMin
+    : rules.feelsMax - idealCenter;
+  if (distance <= sideRange) {
+    const tolerance = sideRange * 0.2;
+    if (distance <= tolerance) return { penalty: 0, factor: 'temp' };
+    const overshoot = (distance - tolerance) / (sideRange - tolerance);
+    return { penalty: overshoot * 12, factor: 'temp' };
+  }
+  if (feels < rules.feelsMin) {
+    return { penalty: 12 + (rules.feelsMin - feels) * 4, factor: 'cold' };
+  }
+  const heatMult = rules.bufferMin >= 25 ? 7 : 5;
+  return { penalty: 12 + (feels - rules.feelsMax) * heatMult, factor: 'heat' };
+}
+
+function windPenalty(w) {
+  if (w <= 8) return 0;
+  if (w > 25) return 17 + (w - 25) * 1.5;
+  return (w - 8) * 1.0;
+}
+
+function precipPenalty(p) {
+  if (p <= 15) return 0;
+  if (p > 40) return 20 + (p - 40) * 0.8;
+  return (p - 15) * 0.8;
+}
+
+function codePenalty(c) {
+  if (c <= 3)               return 0;
+  if (c === 45 || c === 48) return 5;
+  if (c >= 51 && c <= 55)   return 15;
+  if (c >= 56 && c <= 57)   return 25;
+  if (c >= 61 && c <= 65)   return 30;
+  if (c >= 66 && c <= 67)   return 45;
+  if (c >= 71 && c <= 77)   return 35;
+  if (c >= 80 && c <= 82)   return 30;
+  if (c >= 85 && c <= 86)   return 40;
+  if (c >= 95)              return 100;
+  return 0;
+}
+
+// =====================================================================
+// PLOTLY THEME
+// =====================================================================
+const plotlyTheme = {
+  font: { family: 'Manrope, system-ui, sans-serif', size: 13, color: '#1a1815' },
+  paper_bgcolor: '#ffffff',
+  plot_bgcolor: '#ffffff',
+  margin: { l: 70, r: 30, t: 30, b: 60 },
+  xaxis: {
+    gridcolor: '#ece5d7',
+    zerolinecolor: '#d6cdb9',
+    linecolor: '#d6cdb9',
+    tickfont: { family: 'JetBrains Mono, monospace', size: 11, color: '#5a5448' },
+    titlefont: { family: 'Manrope, sans-serif', size: 12, color: '#5a5448' }
+  },
+  yaxis: {
+    gridcolor: '#ece5d7',
+    zerolinecolor: '#d6cdb9',
+    linecolor: '#d6cdb9',
+    tickfont: { family: 'JetBrains Mono, monospace', size: 11, color: '#5a5448' },
+    titlefont: { family: 'Manrope, sans-serif', size: 12, color: '#5a5448' }
+  },
+  hoverlabel: {
+    bgcolor: '#1a1815',
+    bordercolor: '#1a1815',
+    font: { family: 'JetBrains Mono, monospace', size: 12, color: '#ffffff' }
+  },
+  showlegend: false
+};
+
+const plotlyConfig = { displayModeBar: false, responsive: true };
+
+// =====================================================================
+// TEMPERATURE CHART
+// =====================================================================
+const TEMP_RANGE = [];
+for (let t = -10; t <= 30; t += 0.25) TEMP_RANGE.push(t);
+
+let activeRunTypes = new Set(['Easy', 'Long', 'Tempo', 'Strength']);
+
+function buildTempTraces() {
+  const traces = [];
+  for (const [name, rules] of Object.entries(TYPE_RULES)) {
+    if (!activeRunTypes.has(name)) continue;
+    const y = TEMP_RANGE.map(t => Math.max(0, tempPenalty(t, rules).penalty));
+    traces.push({
+      x: TEMP_RANGE,
+      y: y,
+      mode: 'lines',
+      name: name,
+      line: { color: TYPE_COLORS[name], width: 2.5 },
+      hovertemplate: `<b>${name}</b><br>feels %{x:.1f}°C → −%{y:.1f}<extra></extra>`
+    });
+    // Mark the ideal point with a small dot
+    traces.push({
+      x: [rules.feelsIdeal],
+      y: [0],
+      mode: 'markers',
+      marker: { color: TYPE_COLORS[name], size: 9, symbol: 'circle', line: { color: '#ffffff', width: 2 } },
+      hovertemplate: `<b>${name}</b> ideal: ${rules.feelsIdeal}°C<extra></extra>`,
+      showlegend: false
+    });
+  }
+  return traces;
+}
+
+function renderTempChart() {
+  const layout = {
+    ...plotlyTheme,
+    xaxis: { ...plotlyTheme.xaxis, title: 'Feels-like temperature (°C)', range: [-10, 30] },
+    yaxis: { ...plotlyTheme.yaxis, title: 'Penalty (points)', range: [0, 50] },
+    hovermode: 'closest'
+  };
+  Plotly.newPlot('tempChart', buildTempTraces(), layout, plotlyConfig);
+}
+
+// Build run-type pills
+const pillsHost = document.getElementById('runtypePills');
+for (const name of Object.keys(TYPE_RULES)) {
+  const pill = document.createElement('button');
+  pill.className = 'runtype-pill' + (activeRunTypes.has(name) ? ' active' : '');
+  pill.textContent = name;
+  pill.style.borderLeft = `3px solid ${TYPE_COLORS[name]}`;
+  pill.onclick = () => {
+    if (activeRunTypes.has(name)) activeRunTypes.delete(name);
+    else activeRunTypes.add(name);
+    pill.classList.toggle('active');
+    renderTempChart();
+  };
+  pillsHost.appendChild(pill);
+}
+
+renderTempChart();
+
+// =====================================================================
+// WIND CHART
+// =====================================================================
+const WIND_RANGE = [];
+for (let w = 0; w <= 40; w += 0.25) WIND_RANGE.push(w);
+const windY = WIND_RANGE.map(windPenalty);
+
+Plotly.newPlot('windChart', [
+  {
+    x: WIND_RANGE,
+    y: windY,
+    mode: 'lines',
+    line: { color: '#c9532e', width: 3 },
+    fill: 'tozeroy',
+    fillcolor: 'rgba(201, 83, 46, 0.08)',
+    hovertemplate: 'wind %{x:.0f} kph → −%{y:.1f}<extra></extra>'
+  },
+  // Threshold markers
+  {
+    x: [8, 25],
+    y: [windPenalty(8), windPenalty(25)],
+    mode: 'markers',
+    marker: { color: '#1a1815', size: 10, symbol: 'diamond' },
+    hovertemplate: '%{x} kph threshold<extra></extra>'
+  }
+], {
+  ...plotlyTheme,
+  xaxis: { ...plotlyTheme.xaxis, title: 'Wind speed (kph)', range: [0, 40] },
+  yaxis: { ...plotlyTheme.yaxis, title: 'Penalty (points)', range: [0, 45] },
+  hovermode: 'closest',
+  shapes: [
+    { type: 'line', x0: 8, x1: 8, y0: 0, y1: 45, line: { color: '#d6cdb9', width: 1, dash: 'dot' } },
+    { type: 'line', x0: 25, x1: 25, y0: 0, y1: 45, line: { color: '#d6cdb9', width: 1, dash: 'dot' } }
+  ],
+  annotations: [
+    { x: 8, y: 42, text: 'soft threshold', showarrow: false, font: { family: 'JetBrains Mono', size: 10, color: '#5a5448' }, xanchor: 'left', xshift: 6 },
+    { x: 25, y: 42, text: 'harsh threshold', showarrow: false, font: { family: 'JetBrains Mono', size: 10, color: '#5a5448' }, xanchor: 'left', xshift: 6 }
+  ]
+}, plotlyConfig);
+
+// =====================================================================
+// PRECIPITATION CHART
+// =====================================================================
+const PRECIP_RANGE = [];
+for (let p = 0; p <= 100; p += 0.5) PRECIP_RANGE.push(p);
+const precipY = PRECIP_RANGE.map(precipPenalty);
+
+Plotly.newPlot('precipChart', [
+  {
+    x: PRECIP_RANGE,
+    y: precipY,
+    mode: 'lines',
+    line: { color: '#3a7080', width: 3 },
+    fill: 'tozeroy',
+    fillcolor: 'rgba(58, 112, 128, 0.08)',
+    hovertemplate: 'precip %{x:.0f}%% → −%{y:.1f}<extra></extra>'
+  },
+  {
+    x: [15, 40],
+    y: [precipPenalty(15), precipPenalty(40)],
+    mode: 'markers',
+    marker: { color: '#1a1815', size: 10, symbol: 'diamond' },
+    hovertemplate: '%{x}%% threshold<extra></extra>'
+  }
+], {
+  ...plotlyTheme,
+  xaxis: { ...plotlyTheme.xaxis, title: 'Precipitation probability (%)', range: [0, 100] },
+  yaxis: { ...plotlyTheme.yaxis, title: 'Penalty (points)', range: [0, 75] },
+  hovermode: 'closest',
+  shapes: [
+    { type: 'line', x0: 15, x1: 15, y0: 0, y1: 75, line: { color: '#d6cdb9', width: 1, dash: 'dot' } },
+    { type: 'line', x0: 40, x1: 40, y0: 0, y1: 75, line: { color: '#d6cdb9', width: 1, dash: 'dot' } }
+  ],
+  annotations: [
+    { x: 15, y: 70, text: 'soft threshold', showarrow: false, font: { family: 'JetBrains Mono', size: 10, color: '#5a5448' }, xanchor: 'left', xshift: 6 },
+    { x: 40, y: 70, text: 'harsh threshold', showarrow: false, font: { family: 'JetBrains Mono', size: 10, color: '#5a5448' }, xanchor: 'left', xshift: 6 }
+  ]
+}, plotlyConfig);
+
+// =====================================================================
+// WEATHER CODE CHART
+// =====================================================================
+const codes = [
+  { code: '0-3',   label: 'Clear / Cloudy',         penalty: 0 },
+  { code: '45-48', label: 'Fog',                    penalty: 5 },
+  { code: '51-55', label: 'Drizzle',                penalty: 15 },
+  { code: '56-57', label: 'Freezing drizzle',       penalty: 25 },
+  { code: '61-65', label: 'Rain',                   penalty: 30 },
+  { code: '66-67', label: 'Freezing rain',          penalty: 45 },
+  { code: '71-77', label: 'Snow',                   penalty: 35 },
+  { code: '80-82', label: 'Rain showers',           penalty: 30 },
+  { code: '85-86', label: 'Snow showers',           penalty: 40 },
+  { code: '95+',   label: 'Thunderstorm',           penalty: 100 }
+];
+
+Plotly.newPlot('weatherCodeChart', [
+  {
+    x: codes.map(c => c.label),
+    y: codes.map(c => c.penalty),
+    type: 'bar',
+    marker: {
+      color: codes.map(c => {
+        if (c.penalty === 0) return '#5a7c3f';
+        if (c.penalty <= 15) return '#c89020';
+        if (c.penalty <= 35) return '#c9532e';
+        return '#b8412c';
+      })
+    },
+    text: codes.map(c => c.code),
+    textposition: 'inside',
+    insidetextfont: { color: '#ffffff', family: 'JetBrains Mono', size: 10 },
+    hovertemplate: '<b>%{x}</b><br>WMO %{text} → −%{y}<extra></extra>'
+  }
+], {
+  ...plotlyTheme,
+  xaxis: { ...plotlyTheme.xaxis, title: '', tickangle: -25 },
+  yaxis: { ...plotlyTheme.yaxis, title: 'Penalty (points)', range: [0, 110] },
+  margin: { l: 70, r: 30, t: 30, b: 100 }
+}, plotlyConfig);
+
+// =====================================================================
+// SCENARIO BUILDER
+// =====================================================================
+const runTypeSelect = document.getElementById('run-type');
+for (const name of Object.keys(TYPE_RULES)) {
+  const opt = document.createElement('option');
+  opt.value = name;
+  opt.textContent = name;
+  runTypeSelect.appendChild(opt);
+}
+runTypeSelect.value = 'Easy';
+
+const inputs = {
+  type:   runTypeSelect,
+  feels:  document.getElementById('feels'),
+  wind:   document.getElementById('wind'),
+  precip: document.getElementById('precip'),
+  wcode:  document.getElementById('wcode')
+};
+
+function verdict(score) {
+  if (score >= 90) return 'Prime running window';
+  if (score >= 80) return 'Excellent window';
+  if (score >= 70) return 'Solid choice';
+  if (score >= 60) return 'Acceptable, with caveats';
+  if (score >= 40) return 'Marginal — consider rescheduling';
+  return 'Skip if you can';
+}
+
+function scoreClass(score) {
+  if (score >= 80) return 'good';
+  if (score >= 60) return 'warn';
+  return 'bad';
+}
+
+function updateScenario() {
+  const rules = TYPE_RULES[inputs.type.value];
+  const feels = parseFloat(inputs.feels.value);
+  const wind  = parseFloat(inputs.wind.value);
+  const precip = parseFloat(inputs.precip.value);
+  const wcode = parseInt(inputs.wcode.value, 10);
+
+  document.getElementById('feels-val').textContent = `${feels.toFixed(1)} °C`;
+  document.getElementById('wind-val').textContent  = `${wind.toFixed(0)} kph`;
+  document.getElementById('precip-val').textContent = `${precip.toFixed(0)} %`;
+
+  const tempResult = tempPenalty(feels, rules);
+  const tempPen = Math.max(0, tempResult.penalty);
+  const windPen = windPenalty(wind);
+  const precipPen = precipPenalty(precip);
+  const codePen = codePenalty(wcode);
+
+  const deductions = [];
+  if (tempPen > 0.5)   deductions.push({ factor: tempResult.factor, amount: tempPen,   detail: `${feels.toFixed(1)} °C` });
+  if (codePen > 0)     deductions.push({ factor: 'weather',         amount: codePen,   detail: `WMO ${wcode}` });
+  if (precipPen > 0.5) deductions.push({ factor: 'precip',          amount: precipPen, detail: `${precip.toFixed(0)} %` });
+  if (windPen > 0.5)   deductions.push({ factor: 'wind',            amount: windPen,   detail: `${wind.toFixed(0)} kph` });
+
+  const totalPenalty = deductions.reduce((a, d) => a + d.amount, 0);
+  const score = Math.max(0, Math.round(100 - totalPenalty));
+
+  const scoreEl = document.getElementById('score-num');
+  scoreEl.textContent = score;
+  scoreEl.className = 'score-num ' + scoreClass(score);
+
+  document.getElementById('score-verdict').textContent = verdict(score);
+
+  const breakdownEl = document.getElementById('breakdown');
+  if (deductions.length === 0) {
+    breakdownEl.innerHTML = '<div class="empty-breakdown">No deductions — perfect conditions.</div>';
+  } else {
+    breakdownEl.innerHTML = deductions.map(d => `
+      <div class="breakdown-row">
+        <span class="b-factor">${d.factor}</span>
+        <span class="b-detail">${d.detail}</span>
+        <span class="b-amount">−${Math.round(d.amount)}</span>
+      </div>
+    `).join('');
+  }
+}
+
+Object.values(inputs).forEach(el => el.addEventListener('input', updateScenario));
+updateScenario();
+</script>
+</body>
+</html>

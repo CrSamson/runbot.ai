@@ -1,0 +1,505 @@
+{
+  "name": "Personal Running Assistant",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "6bfe37b9-0fbe-46b8-8c73-825ad3196833",
+      "name": "Daily at 8:00 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        112,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.open-meteo.com/v1/forecast?latitude=YOUR_LATITUDE&longitude=YOUR_LONGITUDE&hourly=temperature_2m,apparent_temperature,precipitation_probability,windspeed_10m,weathercode&timezone=YOUR_TIMEZONE&forecast_days=7",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "2980e2bb-552f-4d2d-88f6-fd4e0632234d",
+      "name": "Fetch Weather Forecast",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        512,
+        784
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n// INPUTS\n// =====================================================================\nconst runnaRaw   = $('Fetch Runna Events').all().map(i => i.json);\nconst generalRaw = $('Fetch General Calendar').all().map(i => i.json);\nconst weatherRaw = $('Fetch Weather Forecast').all().map(i => i.json);\n\n// =====================================================================\n// MODE DETECTION — based on which trigger fired (works for manual exec too)\n// =====================================================================\nconst TZ = 'America/Montreal';\n\nfunction triggerFired(name) {\n  try {\n    const items = $(name).all();\n    return Array.isArray(items) && items.length > 0;\n  } catch (e) {\n    return false;\n  }\n}\n\nlet mode;\nif (triggerFired('Weekly trigger')) {\n  mode = 'weekly';\n} else if (triggerFired('Daily at 8:00 AM')) {\n  mode = 'daily';\n} else {\n  // Fallback: clock-based detection\n  const localDay  = new Date().toLocaleString('en-US', { timeZone: TZ, weekday: 'long' });\n  const localHour = parseInt(new Date().toLocaleString('en-US', { timeZone: TZ, hour: '2-digit', hour12: false }), 10);\n  mode = (localDay === 'Sunday' && localHour >= 20) ? 'weekly' : 'daily';\n}\n\nconst todayLocal = new Date().toLocaleDateString('en-CA', { timeZone: TZ });\n\n// =====================================================================\n// PREFERENCES\n// =====================================================================\nconst PREFS = {\n  earliestHour:       6,\n  latestHour:         21,\n  daysAhead:          mode === 'weekly' ? 8 : 1,\n  defaultDurationMin: 60,\n  altGapHours:        4\n};\n\n// feelsIdeal = where this run type runs best (research-aligned 7-10°C sweet spot)\n// feelsMin/feelsMax = where this run type is still tolerable (band edges)\n// Asymmetry is intentional: more headroom on the warm side because acclimatized\n// runners cope with heat better than the ideal would suggest, while extreme cold\n// degrades performance more sharply.\nconst TYPE_RULES = {\n  Easy:           { feelsMin: 4,  feelsMax: 18, feelsIdeal: 10, bufferMin: 15 },\n  Long:           { feelsMin: 0,  feelsMax: 14, feelsIdeal: 7,  bufferMin: 25 },\n  Tempo:          { feelsMin: 3,  feelsMax: 16, feelsIdeal: 9,  bufferMin: 20 },\n  Interval:       { feelsMin: 3,  feelsMax: 16, feelsIdeal: 9,  bufferMin: 25 },\n  'Time Trial':   { feelsMin: 2,  feelsMax: 14, feelsIdeal: 7,  bufferMin: 30 },\n  'Rolling 400s': { feelsMin: 3,  feelsMax: 16, feelsIdeal: 9,  bufferMin: 25 },\n  Fartlek:        { feelsMin: 3,  feelsMax: 16, feelsIdeal: 9,  bufferMin: 20 },\n  'Hill Repeats': { feelsMin: 2,  feelsMax: 14, feelsIdeal: 7,  bufferMin: 25 },\n  Progression:    { feelsMin: 3,  feelsMax: 15, feelsIdeal: 8,  bufferMin: 20 },\n  Strength:       { feelsMin: 4,  feelsMax: 17, feelsIdeal: 10, bufferMin: 20 },\n  default:        { feelsMin: 4,  feelsMax: 18, feelsIdeal: 10, bufferMin: 15 }\n};\n\n// =====================================================================\n// 1. PARSE RUNNA\n// =====================================================================\nfunction parseDurationMin(desc) {\n  if (!desc) return null;\n  const block = desc.split('\\n')[0];\n  const re = /(\\d+)\\s*h(?:\\s*(\\d+)\\s*m)?|(\\d+)\\s*m/g;\n  let upper = null, m;\n  while ((m = re.exec(block)) !== null) {\n    const mins = m[1] !== undefined\n      ? parseInt(m[1], 10) * 60 + (m[2] ? parseInt(m[2], 10) : 0)\n      : parseInt(m[3], 10);\n    if (upper === null || mins > upper) upper = mins;\n  }\n  return upper;\n}\n\nfunction parseRunna(e) {\n  if (!e.start?.date) return null;\n  let title = (e.summary || '').replace(/^[\\p{Extended_Pictographic}\\s]+/u, '').trim();\n  title = title.replace(/\\s*•\\s*\\d+(?:\\.\\d+)?\\s*(km|mi)\\s*$/i, '');\n\n  const distMatch = title.match(/(\\d+(?:\\.\\d+)?)\\s*(km|mi)/i);\n  const typeMatch = title.match(/(Easy|Long|Tempo|Interval|Time Trial|Rolling 400s|Fartlek|Hill Repeats|Progression|Strength)\\s*Run/i);\n\n  const typeKey = typeMatch ? typeMatch[1] : null;\n  const rules   = TYPE_RULES[typeKey] || TYPE_RULES.default;\n  const runMin  = parseDurationMin(e.description) ?? PREFS.defaultDurationMin;\n\n  return {\n    date:        e.start.date,\n    title,\n    distance:    distMatch ? distMatch[0] : null,\n    type:        typeKey ? typeKey + ' Run' : 'Run',\n    runMin,\n    bufferMin:   rules.bufferMin,\n    durationMin: runMin + rules.bufferMin,\n    rules\n  };\n}\n\nconst runnaByDate = new Map();\nfor (const e of runnaRaw) {\n  const r = parseRunna(e);\n  if (r) runnaByDate.set(r.date, r);\n}\n\n// =====================================================================\n// FILTER RUNS BASED ON MODE\n// =====================================================================\nconst runsToConsider = new Map();\nfor (const [date, run] of runnaByDate) {\n  if (mode === 'daily'  && date === todayLocal) runsToConsider.set(date, run);\n  if (mode === 'weekly' && date >  todayLocal) runsToConsider.set(date, run);\n}\n\n// =====================================================================\n// 2. PARSE GENERAL CALENDAR\n// =====================================================================\nconst busyEvents = generalRaw\n  .filter(e => e.start?.dateTime && e.end?.dateTime)\n  .filter(e => e.creator?.displayName !== 'Runna' && e.organizer?.displayName !== 'Runna')\n  .map(e => ({\n    title: e.summary || '(no title)',\n    start: new Date(e.start.dateTime),\n    end:   new Date(e.end.dateTime)\n  }));\n\nfunction hasConflict(start, end) {\n  return busyEvents.some(ev => start < ev.end && end > ev.start);\n}\n\n// =====================================================================\n// 3. PARSE WEATHER\n// =====================================================================\nconst w  = weatherRaw[0];\nconst wh = w.hourly;\nconst offsetSec = w.utc_offset_seconds ?? 0;\nconst sign = offsetSec >= 0 ? '+' : '-';\nconst abs  = Math.abs(offsetSec);\nconst tzSuffix = `${sign}${String(Math.floor(abs/3600)).padStart(2,'0')}:${String(Math.floor((abs%3600)/60)).padStart(2,'0')}`;\n\nconst hours = wh.time.map((t, i) => ({\n  time:        new Date(`${t}:00${tzSuffix}`),\n  localTime:   t,\n  localDate:   t.slice(0, 10),\n  localHour:   parseInt(t.slice(11, 13), 10),\n  tempC:       wh.temperature_2m[i],\n  feelsLikeC:  wh.apparent_temperature[i],\n  precipProb:  wh.precipitation_probability[i],\n  windKph:     wh.windspeed_10m[i],\n  weatherCode: wh.weathercode[i]\n}));\n\nfunction toLocalString(date) {\n  const ms = date.getTime() + offsetSec * 1000;\n  return new Date(ms).toISOString().slice(0, 16).replace('T', ' ');\n}\n\n// =====================================================================\n// 4. SCORING\n// =====================================================================\nfunction codePenalty(c) {\n  if (c <= 3)               return 0;\n  if (c === 45 || c === 48) return 5;\n  if (c >= 51 && c <= 55)   return 15;\n  if (c >= 56 && c <= 57)   return 25;\n  if (c >= 61 && c <= 65)   return 30;\n  if (c >= 66 && c <= 67)   return 45;\n  if (c >= 71 && c <= 77)   return 35;\n  if (c >= 80 && c <= 82)   return 30;\n  if (c >= 85 && c <= 86)   return 40;\n  if (c >= 95)              return 100;\n  return 0;\n}\n\nfunction scoreHour(h, rules) {\n  if (h.localHour < PREFS.earliestHour || h.localHour >= PREFS.latestHour) return null;\n\n  let score = 100;\n  const deductions = [];\n  const deduct = (factor, amount, detail) => {\n    if (amount <= 0.5) return;\n    score -= amount;\n    deductions.push({ factor, amount: -Math.round(amount), detail });\n  };\n\n  // ===== TEMPERATURE =====\n  // feelsIdeal = sweet-spot center (where this run type runs best).\n  // sideRange = distance from ideal to whichever band edge applies on this side.\n  // Asymmetric: cold side may be narrower than warm side (or vice versa).\n  // Penalty reaches exactly 12 at the band edge, then continues from 12 outside —\n  // no discontinuity at the boundary.\n  const idealCenter = rules.feelsIdeal;\n  const distance    = Math.abs(h.feelsLikeC - idealCenter);\n  const sideRange   = h.feelsLikeC < idealCenter\n    ? idealCenter - rules.feelsMin\n    : rules.feelsMax - idealCenter;\n\n  if (distance <= sideRange) {\n    const tolerance = sideRange * 0.2;\n    if (distance > tolerance) {\n      const overshoot = (distance - tolerance) / (sideRange - tolerance);\n      deduct('temp', overshoot * 12, `feels ${h.feelsLikeC.toFixed(1)}°C`);\n    }\n  } else {\n    if (h.feelsLikeC < rules.feelsMin) {\n      deduct('cold', 12 + (rules.feelsMin - h.feelsLikeC) * 4, `feels ${h.feelsLikeC.toFixed(1)}°C`);\n    } else {\n      const heatMult = rules.bufferMin >= 25 ? 7 : 5;\n      deduct('heat', 12 + (h.feelsLikeC - rules.feelsMax) * heatMult, `feels ${h.feelsLikeC.toFixed(1)}°C`);\n    }\n  }\n\n  // ===== WEATHER CODE =====\n  const codeAmt = codePenalty(h.weatherCode);\n  if (codeAmt > 0) deduct('weather', codeAmt, `code ${h.weatherCode}`);\n\n  // ===== PRECIPITATION =====\n  // Soft above 15% (0.8/percentage), continues from 20 at the 40% boundary\n  // (20 = where soft regime ends: (40-15)*0.8). No discontinuity.\n  if (h.precipProb > 15) {\n    const amt = h.precipProb > 40\n      ? 20 + (h.precipProb - 40) * 0.8\n      : (h.precipProb - 15) * 0.8;\n    deduct('precip', amt, `${h.precipProb}% chance`);\n  }\n\n  // ===== WIND =====\n  // Soft above 8 kph (1.0/kph), continues from 17 at the 25 kph boundary\n  // (17 = where soft regime ends: (25-8)*1.0). No discontinuity.\n  if (h.windKph > 8) {\n    const amt = h.windKph > 25\n      ? 17 + (h.windKph - 25) * 1.5\n      : (h.windKph - 8) * 1.0;\n    deduct('wind', amt, `${h.windKph.toFixed(0)} kph`);\n  }\n\n  return { total: Math.max(0, Math.round(score)), deductions };\n}\n\n// =====================================================================\n// 5. MAIN LOOP\n// =====================================================================\nconst cutoff = Date.now() + PREFS.daysAhead * 24 * 3600 * 1000;\nconst gapMs  = PREFS.altGapHours * 3600 * 1000;\nconst out    = [];\n\nfor (const [date, run] of runsToConsider) {\n  const dayHours = hours.filter(h =>\n    h.localDate === date &&\n    h.time.getTime() >= Date.now() &&\n    h.time.getTime() <= cutoff\n  );\n  if (dayHours.length === 0) continue;\n\n  const slotMs       = run.durationMin * 60 * 1000;\n  const hoursSpanned = Math.ceil(run.durationMin / 60);\n\n  const candidates = [];\n  for (let i = 0; i <= dayHours.length - hoursSpanned; i++) {\n    const start = dayHours[i].time;\n    const end   = new Date(start.getTime() + slotMs);\n\n    const spanResults = [];\n    let valid = true;\n    for (let j = 0; j < hoursSpanned; j++) {\n      const r = scoreHour(dayHours[i + j], run.rules);\n      if (r === null) { valid = false; break; }\n      spanResults.push(r);\n    }\n    if (!valid || spanResults.length === 0) continue;\n    if (hasConflict(start, end)) continue;\n\n    const avg = Math.round(\n      spanResults.reduce((a, r) => a + r.total, 0) / spanResults.length\n    );\n    const allDeductions = spanResults.flatMap(r => r.deductions);\n    const worstFactor = allDeductions.length\n      ? allDeductions.slice().sort((a, b) => a.amount - b.amount)[0]\n      : null;\n\n    const h0         = dayHours[i];\n    const startLocal = h0.localTime.replace('T', ' ');\n    const endLocal   = toLocalString(end);\n\n    candidates.push({\n      startISO:   start.toISOString(),\n      endISO:     end.toISOString(),\n      startLocal,\n      endLocal,\n      score:      avg,\n      worstFactor,\n      weather: {\n        tempC:       h0.tempC,\n        feelsLikeC:  h0.feelsLikeC,\n        precipProb:  h0.precipProb,\n        windKph:     h0.windKph,\n        weatherCode: h0.weatherCode\n      }\n    });\n  }\n\n  candidates.sort((a, b) => b.score - a.score);\n  const picked = [];\n  for (const c of candidates) {\n    if (picked.length === 0) {\n      picked.push({ ...c, label: 'primary' });\n    } else if (picked.length < 2) {\n      const distance = Math.abs(new Date(c.startISO) - new Date(picked[0].startISO));\n      if (distance >= gapMs) {\n        picked.push({ ...c, label: 'alternate' });\n        break;\n      }\n    }\n  }\n\n  if (picked.length > 0) {\n    const p = picked[0];\n    const a = picked[1] || null;\n    const pTime = `${p.startLocal.slice(11)}–${p.endLocal.slice(11)}`;\n    const aTime = a ? `${a.startLocal.slice(11)}–${a.endLocal.slice(11)}` : null;\n\n    out.push({\n      mode,\n      date,\n      run,\n      recommendation: p,\n      alternate:      a,\n      summary: `🏃 ${date} — ${run.title} (${run.runMin}min run + ${run.bufferMin}min buffer = ${run.durationMin}min slot). Best: ${pTime} · feels ${p.weather.feelsLikeC.toFixed(1)}°C, ${p.weather.precipProb}% precip, ${p.weather.windKph.toFixed(0)} kph wind · score ${p.score}/100${aTime ? ` · alt ${aTime} (${a.score})` : ''}`\n    });\n  } else {\n    out.push({\n      mode,\n      date,\n      run,\n      recommendation: null,\n      alternate:      null,\n      summary: `⚠️ ${date} — ${run.title}: no free, weather-acceptable window found.`\n    });\n  }\n}\n\nout.sort((a, b) => a.date.localeCompare(b.date));\n\nif (out.length === 0) {\n  return [{ json: {\n    mode,\n    warning: mode === 'daily'\n      ? '🛌 No run scheduled today — rest day!'\n      : 'No runs scheduled for the upcoming week.'\n  }}];\n}\n\nreturn out.map(r => ({ json: r }));"
+      },
+      "id": "9a1e084d-4e0f-4f99-bf61-a41f8458b4fc",
+      "name": "Find Optimal Running Window",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        416
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL@example.com",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false,
+          "senderName": "RunBot"
+        }
+      },
+      "id": "9f079b99-4eaf-4bd5-9ba4-c2446de9c044",
+      "name": "Send Recommendation Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        384
+      ],
+      "webhookId": "be8c06d0-aced-4beb-88ed-c73855a59845",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "tt1SACUHgTiHBHLy",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "YOUR_ID@import.calendar.google.com",
+          "mode": "list",
+          "cachedResultName": "Runna"
+        },
+        "returnAll": true,
+        "timeMin": "={{ $today.toISO() }}",
+        "timeMax": "={{ $now.plus({ days: 14 }).toISO() }}",
+        "options": {}
+      },
+      "id": "1de7ed1c-9ce5-4d41-a01f-cc9a7f5a76ed",
+      "name": "Fetch Runna Events",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        512,
+        208
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "eegLssNN4OLzYZ86",
+          "name": "Google Calendar OAuth2 API"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        816,
+        400
+      ],
+      "id": "313f1449-12e2-4add-a885-071a019a4b9d",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "YOUR_EMAIL@example.com",
+          "mode": "list",
+          "cachedResultName": "YOUR_EMAIL@example.com"
+        },
+        "returnAll": true,
+        "timeMin": "={{ $today.toISO() }}",
+        "timeMax": "={{ $now.plus({ days: 14 }).toISO() }}",
+        "options": {}
+      },
+      "id": "467fcd26-6391-4730-8324-c569ccc3159b",
+      "name": "Fetch General Calendar",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        512,
+        496
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "eegLssNN4OLzYZ86",
+          "name": "Google Calendar OAuth2 API"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n// SOURCE DATA — handles both daily and weekly paths\n// =====================================================================\n// In weekly mode: input came via Aggregate → Gemini-Agent → here, so\n// the immediate input is the LLM text, not the recommendations. Pull\n// recommendations from Find Optimal Running Window via cross-node ref.\n// In daily mode: input is the direct stream from FOW.\nlet items;\nlet coachNote = '';\n\ntry {\n  const gemini = $('Gemini-Agent').first()?.json;\n  if (gemini?.content?.parts?.[0]?.text) {\n    coachNote = gemini.content.parts[0].text.trim();\n    items = $('Find Optimal Running Window').all().map(i => i.json);\n  }\n} catch (e) {\n  // Gemini-Agent didn't execute (daily mode) — fall through\n}\n\nif (!items) {\n  items = $input.all().map(i => i.json);\n}\n\n// =====================================================================\n// HELPERS\n// =====================================================================\nconst fmtScoreColor = s => s >= 80 ? '#28a745' : s >= 60 ? '#ffc107' : '#dc3545';\n\nconst cleanTitle = t => (t || '').replace(/\\s*•\\s*\\d+(?:\\.\\d+)?\\s*(km|mi)\\s*$/i, '');\n\nfunction fmtDate(iso) {\n  const tz    = 'America/Montreal';\n  const today = new Date().toLocaleDateString('en-CA', { timeZone: tz });\n  const tmrw  = new Date(Date.now() + 86400000).toLocaleDateString('en-CA', { timeZone: tz });\n  if (iso === today) return 'Today';\n  if (iso === tmrw)  return 'Tomorrow';\n  const d = new Date(iso + 'T12:00:00');\n  return d.toLocaleDateString('en-US', {\n    weekday: 'short', month: 'short', day: 'numeric', timeZone: tz\n  });\n}\n\n// =====================================================================\n// EMPTY / REST-DAY EARLY RETURN\n// =====================================================================\nif (items.length === 1 && items[0].warning) {\n  const isDailyRest = items[0].mode === 'daily';\n  return [{ json: {\n    subject: isDailyRest ? '🛌 Rest day' : '🏃 Running plan — no runs found',\n    html:    `<p style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:16px;color:#555;padding:20px;\">${items[0].warning}</p>`,\n    text:    items[0].warning\n  }}];\n}\n\n// =====================================================================\n// ROW BUILDER\n// =====================================================================\nfunction buildRows(r) {\n  if (!r.recommendation) {\n    return `<tr><td colspan=\"4\" style=\"padding:10px;background:#fff8e1;border:1px solid #ffe082;\">\n      ⚠️ <strong>${fmtDate(r.date)}</strong> — ${cleanTitle(r.run.title)}: no free, weather-acceptable window found.\n    </td></tr>`;\n  }\n\n  const p    = r.recommendation;\n  const wf   = p.worstFactor;\n  const time = `${p.startLocal.slice(11)}–${p.endLocal.slice(11)}`;\n\n  const scoreCell = `\n    <strong style=\"color:${fmtScoreColor(p.score)};font-size:20px;\">${p.score}</strong>\n    ${wf ? `<br><span style=\"color:#999;font-size:12px;\">${wf.factor} ${wf.amount}<br>(${wf.detail})</span>` : ''}\n  `;\n\n  const primaryRow = `<tr>\n    <td style=\"padding:10px;border:1px solid #ddd;vertical-align:top;\">\n      <strong>${fmtDate(r.date)}</strong><br>\n      <span style=\"color:#666;font-size:13px;\">${cleanTitle(r.run.title)}</span>\n    </td>\n    <td style=\"padding:10px;border:1px solid #ddd;vertical-align:top;white-space:nowrap;\">\n      <strong style=\"font-size:16px;\">${time}</strong><br>\n      <span style=\"color:#666;font-size:13px;\">${r.run.durationMin}min slot</span>\n    </td>\n    <td style=\"padding:10px;border:1px solid #ddd;vertical-align:top;\">\n      Feels <strong>${p.weather.feelsLikeC.toFixed(1)}°C</strong><br>\n      <span style=\"color:#666;font-size:13px;\">${p.weather.precipProb}% precip · ${p.weather.windKph.toFixed(0)} kph wind</span>\n    </td>\n    <td style=\"padding:10px;border:1px solid #ddd;text-align:center;vertical-align:top;\">\n      ${scoreCell}\n    </td>\n  </tr>`;\n\n  let altRow = '';\n  if (r.alternate) {\n    const a     = r.alternate;\n    const aTime = `${a.startLocal.slice(11)}–${a.endLocal.slice(11)}`;\n    const awf   = a.worstFactor;\n\n    const aScoreCell = `\n      <strong style=\"color:${fmtScoreColor(a.score)};font-size:16px;\">${a.score}</strong>\n      ${awf ? `<br><span style=\"color:#999;font-size:11px;\">${awf.factor} ${awf.amount}</span>` : ''}\n    `;\n\n    altRow = `<tr style=\"background:#fafafa;\">\n      <td style=\"padding:8px 10px;border:1px solid #ddd;color:#999;font-size:12px;font-style:italic;\">↳ alternate</td>\n      <td style=\"padding:8px 10px;border:1px solid #ddd;color:#555;white-space:nowrap;\"><strong>${aTime}</strong></td>\n      <td style=\"padding:8px 10px;border:1px solid #ddd;color:#666;font-size:13px;\">\n        Feels ${a.weather.feelsLikeC.toFixed(1)}°C · ${a.weather.precipProb}% · ${a.weather.windKph.toFixed(0)} kph\n      </td>\n      <td style=\"padding:8px 10px;border:1px solid #ddd;text-align:center;\">${aScoreCell}</td>\n    </tr>`;\n  }\n\n  return primaryRow + altRow;\n}\n\n// =====================================================================\n// MODE-AWARE SUBJECT + HEADER\n// =====================================================================\nconst mode = items[0]?.mode || 'daily';\nconst recs = items.filter(i => i.recommendation);\n\nlet subject, headerLine, headerTitle;\nif (recs.length === 0) {\n  subject     = mode === 'weekly' ? '🏃 Rest week — no runs scheduled' : '🛌 Rest day';\n  headerTitle = mode === 'weekly' ? 'Week Ahead' : 'Today';\n  headerLine  = mode === 'weekly'\n    ? 'No runs scheduled for the upcoming week.'\n    : 'No run scheduled today.';\n} else if (mode === 'daily') {\n  const r     = recs[0];\n  const range = `${r.recommendation.startLocal.slice(11)}–${r.recommendation.endLocal.slice(11)}`;\n  subject     = `🏃 Today's run · ${range}`;\n  headerTitle = \"Today's Run\";\n  headerLine  = \"Here's your window for today:\";\n} else {\n  // weekly\n  const best  = recs.reduce((a, b) =>\n    a.recommendation.score >= b.recommendation.score ? a : b\n  );\n  subject     = `🏃 ${recs.length} runs this week · best ${fmtDate(best.date)} (${best.recommendation.score})`;\n  headerTitle = 'Week Ahead';\n  headerLine  = `Plan for the upcoming week — ${recs.length} run${recs.length > 1 ? 's' : ''} queued. Standout: ${fmtDate(best.date)} (${best.recommendation.score}/100).`;\n}\n\n// =====================================================================\n// COACH'S NOTE BLOCK (weekly only — empty string when no Gemini output)\n// =====================================================================\nconst coachNoteBlock = coachNote ? `\n  <div style=\"background:#fdf6e3;border-left:3px solid #b58900;padding:14px 18px;margin:18px 0 22px;border-radius:6px;\">\n    <p style=\"margin:0 0 6px;font-weight:600;color:#7a5a1c;font-size:13px;letter-spacing:0.4px;\">📋 COACH'S NOTE</p>\n    <p style=\"margin:0;color:#444;font-size:14px;line-height:1.55;\">${coachNote}</p>\n  </div>\n` : '';\n\n// =====================================================================\n// EMAIL ASSEMBLY\n// =====================================================================\nconst rows = items.map(buildRows).join('');\n\nconst html = `<!DOCTYPE html>\n<html><body style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#333;max-width:680px;margin:0 auto;padding:20px;\">\n  <h2 style=\"color:#0066cc;border-bottom:2px solid #0066cc;padding-bottom:8px;margin-bottom:16px;\">🏃 ${headerTitle}</h2>\n  <p style=\"color:#555;\">${headerLine}</p>\n  ${coachNoteBlock}\n  <table style=\"width:100%;border-collapse:collapse;font-size:14px;\">\n    <thead>\n      <tr style=\"background:#f5f5f5;\">\n        <th style=\"padding:10px;border:1px solid #ddd;text-align:left;\">Day & Run</th>\n        <th style=\"padding:10px;border:1px solid #ddd;text-align:left;\">Best Time</th>\n        <th style=\"padding:10px;border:1px solid #ddd;text-align:left;\">Conditions</th>\n        <th style=\"padding:10px;border:1px solid #ddd;text-align:center;\">Score</th>\n      </tr>\n    </thead>\n    <tbody>${rows}</tbody>\n  </table>\n  <p style=\"color:#999;font-size:12px;margin-top:14px;\">\n    Score: <span style=\"color:#28a745;\">●</span> 80+ excellent · \n    <span style=\"color:#ffc107;\">●</span> 60–79 acceptable · \n    <span style=\"color:#dc3545;\">●</span> &lt;60 marginal.\n    The label under the score names the factor that cost the most points (heat/cold/wind/precip/weather).\n  </p>\n  <p style=\"margin-top:20px;color:#999;font-size:12px;\">\n    Generated ${new Date().toLocaleString('en-CA', { timeZone: 'America/Montreal', dateStyle: 'full', timeStyle: 'short' })}\n  </p>\n</body></html>`;\n\nconst text = items.map(r => r.summary || r.warning).join('\\n')\n  + (coachNote ? `\\n\\nCoach's note: ${coachNote}` : '');\n\nreturn [{ json: { subject, html, text } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        400
+      ],
+      "id": "74ff2022-4117-4b3e-8b1d-60bee5f5a1f3",
+      "name": "Format Email",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtHour": 21
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        112,
+        704
+      ],
+      "id": "8782db2e-645b-4551-9808-ab6b57ec1cd9",
+      "name": "Weekly trigger"
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL@example.com",
+        "subject": "=={{ \"RunBot failed: \" + ($json.error?.node?.name || \"unknown step\") }}",
+        "message": "=<pre style=\"font-family:monospace;font-size:12px;background:#f5f5f5;padding:12px;border-radius:6px;\">\nStep: {{ $json.error?.node?.name || \"unknown\" }}\nTime: {{ $now.toISO() }}\nError:\n{{ JSON.stringify($json.error || $json, null, 2) }}\n</pre>",
+        "options": {
+          "appendAttribution": false,
+          "senderName": "RunBot"
+        }
+      },
+      "id": "d2812bce-9ff7-45d1-89fa-ca820e609106",
+      "name": "Workflow failed",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        816
+      ],
+      "webhookId": "be8c06d0-aced-4beb-88ed-c73855a59845",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "tt1SACUHgTiHBHLy",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    mode: $input.first().json.mode,\n    recommendations: $input.all().map(i => i.json)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        -80
+      ],
+      "id": "e0a97b3f-5355-46f8-b5f1-1841263cc1aa",
+      "name": "Aggregate data"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are an experienced running coach reviewing a runner's upcoming week. You'll receive a JSON array of optimal windows (date, run type, score 0–100, weather, deductions). In 3–4 sentences total, identify the standout day, flag any compromised sessions and why, and suggest a priority ordering if conflicts arise. Be specific (cite scores, temps, or factors). No flattery, no preamble — just the analysis.",
+              "role": "model"
+            },
+            {
+              "content": "={{ JSON.stringify($json.recommendations, null, 2) }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1552,
+        128
+      ],
+      "id": "29c42bce-c7dc-4d0c-b683-8ebccde50686",
+      "name": "Gemini-Agent",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "AvzYszznqXUDirq2",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1bff54b4-0c51-4bc5-b2f5-8663543ede97",
+              "leftValue": "={{ $json.mode }}",
+              "rightValue": "weekly",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1296,
+        128
+      ],
+      "id": "64de5280-f421-457a-ac21-66fe29eeeaa6",
+      "name": "If"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily at 8:00 AM": {
+      "main": [
+        [
+          {
+            "node": "Fetch Runna Events",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Weather Forecast",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch General Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Weather Forecast": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ],
+        [
+          {
+            "node": "Workflow failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Optimal Running Window": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Workflow failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Runna Events": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Workflow failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Find Optimal Running Window",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch General Calendar": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Workflow failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Email": {
+      "main": [
+        [
+          {
+            "node": "Send Recommendation Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Workflow failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Runna Events",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch General Calendar",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Weather Forecast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate data": {
+      "main": [
+        [
+          {
+            "node": "Gemini-Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Aggregate data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini-Agent": {
+      "main": [
+        [
+          {
+            "node": "Format Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "9bd716ea-4590-449b-8b95-85db49ef3d22",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "88281fe3ae916056b9eb6998346907e65193ede63fa41c2fa0202a67add792b4"
+  },
+  "id": "D4EkpQIUpOBHQZB9",
+  "tags": []
+}
