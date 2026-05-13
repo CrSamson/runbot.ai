@@ -41,6 +41,8 @@ graph LR
 
 Three Code nodes carry the logic — the rest are off-the-shelf n8n nodes (Schedule, Google Calendar, HTTP Request, Merge, IF, Gmail, Gemini).
 
+If you want to read the Code node logic without importing the workflow into n8n, the scripts are extracted standalone in [`nodes/`](nodes/) (`find-optimal-window.js`, `format-email.js`, `aggregate-data.js`).
+
 ## Setup
 
 ### Prerequisites
@@ -77,7 +79,7 @@ Toggle the workflow active in the top-right. Schedule triggers fire automaticall
 
 ## How the scoring works
 
-Four factors each deduct from a starting score of 100. The full math is in [`docs/scoring-model.md`](docs/scoring-model.md). Open [`docs/scoring-visualizer.html`](docs/scoring-visualizer.html) in your browser for interactive Plotly charts of each penalty curve plus a scenario builder.
+Four factors each deduct from a starting score of 100. The full math is in [`docs/scoring-model.md`](docs/scoring-model.md). The **[interactive scoring visualizer](https://crsamson.github.io/runbot.ai/scoring-visualizer.html)** has Plotly charts of each penalty curve plus a scenario builder — or open [`docs/scoring-visualizer.html`](docs/scoring-visualizer.html) locally.
 
 | Factor | Logic |
 |---|---|
