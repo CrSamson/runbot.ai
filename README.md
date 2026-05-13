@@ -68,7 +68,7 @@ These five values are mine and need to become yours. All edits are in the Code n
 | What | Where | Default |
 |---|---|---|
 | Timezone | `const TZ` near the top | `'America/Montreal'` |
-| Coordinates | `Fetch Weather Forecast` node URL (`latitude=…&longitude=…`) | `XX.XXXX, YY.YYYY` (Montréal) |
+| Coordinates | `Fetch Weather Forecast` node URL (`latitude=…&longitude=…`) | `XX.XXXX, YY.YYYY`|
 | Email recipient | `Send Recommendation Email` and `Workflow failed` nodes, "To" field | placeholder |
 | Calendar names | `Fetch Runna Events` and `Fetch General Calendar` nodes | your calendar IDs |
 | Schedule | `Daily at 8:00 AM` and `Weekly trigger` Schedule Trigger nodes | weekdays 7 AM, Sundays 9 PM |
